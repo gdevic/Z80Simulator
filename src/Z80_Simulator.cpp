@@ -42,7 +42,9 @@ uint16_t stack_x[FILL_STACK_SIZE];
 uint16_t stack_y[FILL_STACK_SIZE];
 uint16_t stack_layer[FILL_STACK_SIZE];
 
+#ifndef ZeroMemory
 #define ZeroMemory(p, sz) memset((p), 0, (sz))
+#endif
 
 #if !defined(WINDOWS)
 uint64_t GetTickCount()
