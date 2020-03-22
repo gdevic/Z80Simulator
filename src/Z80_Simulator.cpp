@@ -28,6 +28,9 @@
 
 using namespace std;
 
+// GD: my changes
+#define GDX 1
+
 // DMB: Not a problem on Linux!
 // it says that fopen is unsafe
 //#pragma warning(disable : 4996)
@@ -67,6 +70,7 @@ unsigned int DIVISOR = 600; // the lower the faster is clock, 1000 is lowest val
 #define MAXQUANTUM 600.0f // charge gets truncated to this value
 #define PULLUPDEFLATOR 1.1f // positive charge gets divided by this
 
+// Define "type" of each pixel data in pombuf
 #define METAL 1
 #define POLYSILICON 2
 #define DIFFUSION 4
@@ -149,7 +153,7 @@ uint16_t *signals_diff;
 // trying to keep FillObject local heap as small as possible
 int type, type2, type3;
 
-png::image<png::rgb_pixel> bd;
+png::image<png::rgb_pixel> bd; // FillObject uses this buffer data implicitly
 
 int shapesize;
 bool objectfound;
@@ -576,6 +580,7 @@ int Pad::ReadOutputStatus()
 
 int GetPixelFromBitmapData(png::image<png::rgb_pixel>& image, int x, int y)
 {
+#if 0 // XXX Are those checks necessary? The coordinates seem to be checked by each caller
    if (x < 0)
       return 0;
    if (y < 0)
@@ -584,7 +589,7 @@ int GetPixelFromBitmapData(png::image<png::rgb_pixel>& image, int x, int y)
       return 0;
    if (y >= size_y)
       return 0;
-
+#endif
    png::rgb_pixel pixel = image[y][x];
 
    return pixel.red + (pixel.green << 8) + (pixel.blue << 16);
@@ -615,6 +620,7 @@ bool SetPixelToBitmapData(png::image<png::rgba_pixel>& image, int x, int y, int 
 
 bool FillObject(int x, int y)
 {
+    // Skip (recursive) pixel if pombuf[] already contains this layer type OR if (processing) bitmap data is zero
    if (pombuf[y * size_x + x] & type || !GetPixelFromBitmapData(bd, x, y)) {
       return false;
    }
@@ -628,7 +634,7 @@ bool FillObject(int x, int y)
       x = stack_x[stack_ptr];
       y = stack_y[stack_ptr];
 
-      pombuf[y * size_x + x] |= type;
+      pombuf[y * size_x + x] |= type; // pombuf[] is being set to this (global) type layer bit
       shapesize++;
 
       for (int i = 0; i < 4; i++) {
@@ -641,6 +647,7 @@ bool FillObject(int x, int y)
          case 3: nx = x    ; ny = y + 1; break;
          }
          if (nx >= 0 && nx < size_x && ny >= 0 && ny < size_y) {
+             // Skip (recursive) pixel if pombuf[] already contains this layer type OR if (processing) bitmap data is zero
             if (!(pombuf[ny * size_x + nx] & type) && GetPixelFromBitmapData(bd, nx, ny)) {
                if (stack_ptr < FILL_STACK_SIZE) {
                   stack_x[stack_ptr] = nx;
@@ -657,7 +664,11 @@ bool FillObject(int x, int y)
    return true;
 }
 
-
+// Set pombuf[] bit with "type" only where pombuf[] & type2 is not type3
+// Example:
+// type = TRANSISTORS;
+// type2 = POLYSILICON | DIFFUSION | BURIED;
+// type3 = POLYSILICON | DIFFUSION;
 bool FillStructure(int x, int y)
 {
    if ((pombuf[y * size_x + x] & type) || (pombuf[y * size_x + x] & type2) != type3) {
@@ -760,7 +771,7 @@ void ClearTemporary()
 // opens the respective file and copies its content to pombuff which holds the layers
 void CheckFile(char *firstpart, int ltype)
 {
-   type = ltype;
+   type = ltype; // Global type contains the layer type, used by FillObject()
 
    char filename[256];
    if (type == VIAS)
@@ -790,15 +801,17 @@ void CheckFile(char *firstpart, int ltype)
       if (verbous)
          printf(" size x: %d, y: %d\n", size_x, size_y);
 
-      if (!pombuf)
+      if (!pombuf) // pombuf is zeroed at the very first call, then it is only |= inside FillObject()
       {
          pombuf = new uint16_t[size_x * size_y];
          ZeroMemory(&pombuf[0], size_x * size_y * sizeof(uint16_t));
       }
 
       // Assign global variable, used by FillObject
+#if GDX // If we don't use FillObject() down below, we don't need to assign to "bd" but instead pick data from the current "bitmapa"
+#else
       bd = bitmapa;
-
+#endif
       int bitmap_room = 0;
       for (int y = 0; y < size_y; y++)
          for (int x = 0; x < size_x; x++)
@@ -807,10 +820,15 @@ void CheckFile(char *firstpart, int ltype)
       if (verbous)
          printf("Percentage: %.2f%%\n", 100.0 * bitmap_room / size_x / size_y);
 
+#if GDX // You can simply assign the layers to pombuf[] without a fill (if you don't care about tracking the object size)
+      for (int y = 0; y < size_y; y++)
+          for (int x = 0; x < size_x; x++)
+              pombuf[y * size_x + x] |= GetPixelFromBitmapData(bitmapa, x, y) ? type : 0;
+#else
       int bitmap_count = 0;
       for (int y = 0; y < size_y; y++)
          for (int x = 0; x < size_x; x++)
-            if (shapesize = 0, FillObject(x, y))
+            if (shapesize = 0, FillObject(x, y)) // FillObject() reads from (global) bd a specific (global) type and |= pombuf[]
             {
                bitmap_count++;
                if (shapesize < MINSHAPESIZE)
@@ -822,7 +840,7 @@ void CheckFile(char *firstpart, int ltype)
          printf("Count: %d\n", bitmap_count);
          printf("---------------------\n");
       }
-
+#endif
    } catch (png::std_error e) {
       printf("\nCannot open file: %s\n", filename);
       ::exit(1);
@@ -1285,7 +1303,7 @@ int main(int argc, char *argv[])
                printf("Buried under via at: %d %d.\n", x, y);
 
    int structure_count = 0;
-   type = TRANSISTORS;
+   type = TRANSISTORS; // Transistors happen when there is a DIFFUSION layer underneath the POLYSILICON (without being connected via BURIED path)
    type2 = POLYSILICON | DIFFUSION | BURIED;
    type3 = POLYSILICON | DIFFUSION;
    for (int y = 0; y < size_y; y++)
