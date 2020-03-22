@@ -31,6 +31,14 @@ using namespace std;
 // GD: my changes
 #define GDX 1
 
+// GD: Adding serialization support
+#include <cereal/types/vector.hpp>
+#include <cereal/archives/binary.hpp>
+#include <fstream>
+
+// Use chip definition from serialized datafile (skip all init compute), "-state"
+bool state = false;
+
 // DMB: Not a problem on Linux!
 // it says that fopen is unsafe
 //#pragma warning(disable : 4996)
@@ -177,6 +185,12 @@ public:
    int terminal;
    int index;
    float proportion;
+
+   template <class Archive>
+   void serialize(Archive & ar)
+   {
+       ar(terminal, index, proportion);
+   }
 };
 
 Connection::Connection()
@@ -202,6 +216,8 @@ public:
    vector<Connection> connections;
    float signalarea;
    bool ignore;
+
+   template <class Archive> void serialize(Archive & ar) { ar(connections, signalarea, ignore); }
 };
 
 Signal::Signal()
@@ -229,6 +245,8 @@ public:
    int x, y;
    int origsignal;
    vector<Connection> connections;
+
+   template <class Archive> void serialize(Archive & ar) { ar(type, x, y, origsignal, connections); }
 };
 
 Pad::Pad()
@@ -266,6 +284,13 @@ public:
    vector<Connection> drainconnections;
    float gateneighborhood, sourceneighborhood, drainneighborhood;
    float chargetobeon, pomchargetogo;
+
+   template <class Archive> void serialize(Archive & ar)
+   {
+       ar(x, y, gate, source, drain, sourcelen, drainlen, otherlen, area, depletion, resist, gatecharge, sourcecharge, draincharge,
+           gateneighborhood, sourceneighborhood, drainneighborhood, chargetobeon, pomchargetogo);
+       ar(gateconnections, sourceconnections, drainconnections);
+   }
 };
 
 Transistor::Transistor()
@@ -1168,6 +1193,8 @@ int main(int argc, char *argv[])
 
    for (int i = 2; i < argc; i++)
    {
+      if (!::strcmp(argv[i], "-state")) // GD: Use chip state instead of creating it on start
+          state = true;
       if (!::strcmp(argv[i], "-verbous"))
          verbous = true;
       else if (!::strcmp(argv[i], "-quiet"))
@@ -1263,6 +1290,10 @@ int main(int argc, char *argv[])
          printf("Unknown switch %s.\n", argv[i]);
       }
    }
+
+    // GD: Use serialized chip definition
+   if (state)
+       goto simulate;
 
 #ifdef DMB_THREAD
    threadList = new HANDLE[thread_count];
@@ -1411,8 +1442,6 @@ int main(int argc, char *argv[])
 // RouteSignal(6422, 4464, SIG_RESET, METAL);
 
    // Finds all pads and sets its type
-
-   Pad tmppad;
 
    SetupPad(4477, 4777, PAD_CLK, PAD_INPUT);
    SetupPad(200, 500, PAD__RESET, PAD_INPUT);
@@ -1831,53 +1860,53 @@ int main(int argc, char *argv[])
    // Saves the colored metal layer and vias layer - I commented it out as it did not work properly after some changes in code
    // ========================================================================================================================
    // ========================================================================================================================
-
-   png::image<png::rgba_pixel> myImage(size_x, size_y);
-   char filename[256];
-
-   for (int y = 0; y < size_y; y++)
    {
-      for (int x = 0; x < size_x; x++)
-      {
-         if (signals_metal[y * size_x + x] == SIG_GND)
-            ::SetPixelToBitmapData(myImage, x, y, 0x0000ff);
-         else if (signals_metal[y * size_x + x] == SIG_VCC)
-            ::SetPixelToBitmapData(myImage, x, y, 0xff0000);
-         else if (signals_metal[y * size_x + x] == PAD_CLK)
-            ::SetPixelToBitmapData(myImage, x, y, 0xffffff);
-         else if (pombuf[y * size_x + x] & METAL)
-            ::SetPixelToBitmapData(myImage, x, y, 0x00ff00);
-         else
-            ::SetPixelToBitmapData(myImage, x, y, 0x000000);
-      }
-   }
-   sprintf(filename, "%s%s", argv[1], "_metal_VCC_GND.png");
-   myImage.write(filename);
+       png::image<png::rgba_pixel> myImage(size_x, size_y);
+       char filename[256];
 
-   for (int y = 0; y < size_y; y++)
-   {
-      for (int x = 0; x < size_x; x++)
-      {
-         if (pombuf[y * size_x + x] & VIAS)
-         {
-            if (signals_metal[y * size_x + x] == SIG_GND)
-               ::SetPixelToBitmapData(myImage, x, y, 0x3f3fff);
-            else if (signals_metal[y * size_x + x] == SIG_VCC)
-               ::SetPixelToBitmapData(myImage, x, y, 0xff3f3f);
-            else if (signals_metal[y * size_x + x] == PAD_CLK)
-               ::SetPixelToBitmapData(myImage, x, y, 0xffffff);
-            else
-               ::SetPixelToBitmapData(myImage, x, y, 0xff7f00);
-         }
-         else
-         {
-            ::SetPixelToBitmapData(myImage, x, y, 0x000000);
-         }
-      }
-   }
-   sprintf(filename, "%s%s", argv[1], "_vias_VCC_GND.png");
-   myImage.write(filename);
+       for (int y = 0; y < size_y; y++)
+       {
+           for (int x = 0; x < size_x; x++)
+           {
+               if (signals_metal[y * size_x + x] == SIG_GND)
+                   ::SetPixelToBitmapData(myImage, x, y, 0x0000ff);
+               else if (signals_metal[y * size_x + x] == SIG_VCC)
+                   ::SetPixelToBitmapData(myImage, x, y, 0xff0000);
+               else if (signals_metal[y * size_x + x] == PAD_CLK)
+                   ::SetPixelToBitmapData(myImage, x, y, 0xffffff);
+               else if (pombuf[y * size_x + x] & METAL)
+                   ::SetPixelToBitmapData(myImage, x, y, 0x00ff00);
+               else
+                   ::SetPixelToBitmapData(myImage, x, y, 0x000000);
+           }
+       }
+       sprintf(filename, "%s%s", argv[1], "_metal_VCC_GND.png");
+       myImage.write(filename);
 
+       for (int y = 0; y < size_y; y++)
+       {
+           for (int x = 0; x < size_x; x++)
+           {
+               if (pombuf[y * size_x + x] & VIAS)
+               {
+                   if (signals_metal[y * size_x + x] == SIG_GND)
+                       ::SetPixelToBitmapData(myImage, x, y, 0x3f3fff);
+                   else if (signals_metal[y * size_x + x] == SIG_VCC)
+                       ::SetPixelToBitmapData(myImage, x, y, 0xff3f3f);
+                   else if (signals_metal[y * size_x + x] == PAD_CLK)
+                       ::SetPixelToBitmapData(myImage, x, y, 0xffffff);
+                   else
+                       ::SetPixelToBitmapData(myImage, x, y, 0xff7f00);
+               }
+               else
+               {
+                   ::SetPixelToBitmapData(myImage, x, y, 0x000000);
+               }
+           }
+       }
+       sprintf(filename, "%s%s", argv[1], "_vias_VCC_GND.png");
+       myImage.write(filename);
+   }
 
    // =============================
    // End of saving colored bitmaps
@@ -1888,6 +1917,35 @@ int main(int argc, char *argv[])
    delete signals_poly;
    delete signals_metal;
 
+    // -------------------------------------------------------
+    // SERIALIZE SIMULATION DATA
+    // -------------------------------------------------------
+    {
+        std::ofstream os("z80.state", std::ios::binary);
+        cereal::BinaryOutputArchive archive(os);
+
+        archive(transistors);
+        archive(signals);
+        archive(pads);
+    }
+
+simulate:
+
+    transistors.clear();
+    signals.clear();
+    pads.clear();
+
+    // -------------------------------------------------------
+    // READ SIMULATION DATA
+    // -------------------------------------------------------
+    {
+        std::ifstream is("z80.state", std::ios::binary);
+        cereal::BinaryInputArchive archive(is);
+
+        archive(transistors);
+        archive(signals);
+        archive(pads);
+    }
 
    // -------------------------------------------------------
    // -------------------------------------------------------
