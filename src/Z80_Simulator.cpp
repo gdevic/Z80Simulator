@@ -36,8 +36,11 @@ using namespace std;
 #include <cereal/archives/binary.hpp>
 #include <fstream>
 
-// Use chip netlist from serialized datafile (skip all init compute), "-state"
-bool netlist = false;
+// Use chip netlist from serialized datafile (skips all init compute) with "-netlist <file>" command line argument
+// Save netlist on start with "-netlist-save <file>" command argument
+char *netlist_file = nullptr;
+bool netlist_save = false; // We have both save and load so we can immediately test the saved file
+bool netlist_load = false;
 
 // DMB: Not a problem on Linux!
 // it says that fopen is unsafe
@@ -186,11 +189,7 @@ public:
    int index;
    float proportion;
 
-   template <class Archive>
-   void serialize(Archive & ar)
-   {
-       ar(terminal, index, proportion);
-   }
+   template <class Archive> void serialize(Archive & ar) { ar(terminal, index, proportion); }
 };
 
 Connection::Connection()
@@ -287,8 +286,8 @@ public:
 
    template <class Archive> void serialize(Archive & ar)
    {
-       ar(x, y, gate, source, drain, sourcelen, drainlen, otherlen, area, depletion, resist, gatecharge, sourcecharge, draincharge,
-           gateneighborhood, sourceneighborhood, drainneighborhood, chargetobeon, pomchargetogo);
+       ar(x, y, gate, source, drain, sourcelen, drainlen, otherlen, area, depletion);
+       ar(resist, gatecharge, sourcecharge, draincharge, gateneighborhood, sourceneighborhood, drainneighborhood, chargetobeon, pomchargetogo);
        ar(gateconnections, sourceconnections, drainconnections);
    }
 };
@@ -1193,8 +1192,28 @@ int main(int argc, char *argv[])
 
    for (int i = 2; i < argc; i++)
    {
-      if (!::strcmp(argv[i], "-netlist")) // GD: Use chip saved netlist instead of creating it on start
-          netlist = true;
+      if (!::strcmp(argv[i], "-netlist")) // Use chip saved netlist instead of creating it on the start
+      {
+          i++;
+          if (argc == i)
+              printf("Netlist filename expected.\n");
+          else
+          {
+              netlist_file = argv[i];
+              netlist_load = true;
+          }
+      }
+      else if (!::strcmp(argv[i], "-netlist-save"))
+      {
+          i++;
+          if (argc == i)
+              printf("Netlist filename expected.\n");
+          else
+          {
+              netlist_file = argv[i];
+              netlist_save = true;
+          }
+      }
       else if (!::strcmp(argv[i], "-verbous"))
          verbous = true;
       else if (!::strcmp(argv[i], "-quiet"))
@@ -1291,8 +1310,8 @@ int main(int argc, char *argv[])
       }
    }
 
-    // GD: Use serialized chip netlist
-   if (netlist)
+    // Use serialized chip netlist instead of creating it from images
+   if (netlist_load && !netlist_save)
        goto simulate;
 
 #ifdef DMB_THREAD
@@ -1918,33 +1937,55 @@ int main(int argc, char *argv[])
    delete signals_metal;
 
     // -------------------------------------------------------
-    // SERIALIZE SIMULATION DATA
+    // Save netlist to a file
     // -------------------------------------------------------
+    if (netlist_save && (netlist_file != nullptr))
     {
-        std::ofstream os("z80.netlist", std::ios::binary);
-        cereal::BinaryOutputArchive archive(os);
+        printf("Saving netlist to %s\n", netlist_file);
 
-        archive(transistors);
-        archive(signals);
-        archive(pads);
+        try
+        {
+            std::ofstream os(netlist_file, std::ios::binary);
+            cereal::BinaryOutputArchive archive(os);
+
+            archive(transistors);
+            archive(signals);
+            archive(pads);
+        }
+        catch (...)
+        {
+            fprintf(stderr, "Error saving netlist file %s\n", netlist_file);
+            exit(-1);
+        }
     }
 
 simulate:
 
-    transistors.clear();
-    signals.clear();
-    pads.clear();
-
     // -------------------------------------------------------
-    // READ SIMULATION DATA
+    // Load netlist from a file
     // -------------------------------------------------------
+    if (netlist_load && (netlist_file != nullptr))
     {
-        std::ifstream is("z80.netlist", std::ios::binary);
-        cereal::BinaryInputArchive archive(is);
+        printf("Loading netlist from %s\n", netlist_file);
 
-        archive(transistors);
-        archive(signals);
-        archive(pads);
+        transistors.clear();
+        signals.clear();
+        pads.clear();
+
+        try
+        {
+            std::ifstream is(netlist_file, std::ios::binary);
+            cereal::BinaryInputArchive archive(is);
+
+            archive(transistors);
+            archive(signals);
+            archive(pads);
+        }
+        catch (...)
+        {
+            fprintf(stderr, "Error loading netlist file %s\n", netlist_file);
+            exit(-1);
+        }
     }
 
    // -------------------------------------------------------
