@@ -36,8 +36,8 @@ using namespace std;
 #include <cereal/archives/binary.hpp>
 #include <fstream>
 
-// Use chip definition from serialized datafile (skip all init compute), "-state"
-bool state = false;
+// Use chip netlist from serialized datafile (skip all init compute), "-state"
+bool netlist = false;
 
 // DMB: Not a problem on Linux!
 // it says that fopen is unsafe
@@ -1193,9 +1193,9 @@ int main(int argc, char *argv[])
 
    for (int i = 2; i < argc; i++)
    {
-      if (!::strcmp(argv[i], "-state")) // GD: Use chip state instead of creating it on start
-          state = true;
-      if (!::strcmp(argv[i], "-verbous"))
+      if (!::strcmp(argv[i], "-netlist")) // GD: Use chip saved netlist instead of creating it on start
+          netlist = true;
+      else if (!::strcmp(argv[i], "-verbous"))
          verbous = true;
       else if (!::strcmp(argv[i], "-quiet"))
          verbous = false;
@@ -1291,8 +1291,8 @@ int main(int argc, char *argv[])
       }
    }
 
-    // GD: Use serialized chip definition
-   if (state)
+    // GD: Use serialized chip netlist
+   if (netlist)
        goto simulate;
 
 #ifdef DMB_THREAD
@@ -1921,7 +1921,7 @@ int main(int argc, char *argv[])
     // SERIALIZE SIMULATION DATA
     // -------------------------------------------------------
     {
-        std::ofstream os("z80.state", std::ios::binary);
+        std::ofstream os("z80.netlist", std::ios::binary);
         cereal::BinaryOutputArchive archive(os);
 
         archive(transistors);
@@ -1939,7 +1939,7 @@ simulate:
     // READ SIMULATION DATA
     // -------------------------------------------------------
     {
-        std::ifstream is("z80.state", std::ios::binary);
+        std::ifstream is("z80.netlist", std::ios::binary);
         cereal::BinaryInputArchive archive(is);
 
         archive(transistors);
